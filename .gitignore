@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+**/ffmpeg.exe
+**/whisper.cpp
+.DS_Store
