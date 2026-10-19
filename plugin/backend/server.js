@@ -2,6 +2,8 @@ const http = require('http')
 const WebSocket = require('ws')
 const { spawn } = require('child_process')
 const path = require('path')
+const fs = require('fs')
+const { detectSilence } = require('./silence')
 
 const server = http.createServer()
 const wss = new WebSocket.Server({ server })
@@ -10,11 +12,31 @@ wss.on('connection', (ws) => {
   console.log('client connected')
   ws.send(JSON.stringify({ type:'log', msg:'Welcome to HyperFrame backend' }))
 
-  ws.on('message', (msg) => {
+  ws.on('message', async (msg) => {
     try {
       const data = JSON.parse(msg)
       if (data.action === 'run-ffmpeg-demo') runFFmpegDemo(ws)
-    } catch (e) { console.error(e) }
+      else if (data.action === 'run-silence') {
+        const file = data.input || path.join(__dirname, 'test_assets', 'sample.mp4')
+        ws.send(JSON.stringify({ type:'log', msg:'Starting silence detection on '+file }))
+        try {
+          const cuts = await detectSilence(file, (update) => {
+            ws.send(JSON.stringify({ type:'progress', percent: update }))
+          })
+          // save cutlist
+          const outDir = path.join(__dirname, 'output')
+          if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive:true })
+          const outPath = path.join(outDir, 'cutlist.json')
+          fs.writeFileSync(outPath, JSON.stringify(cuts, null, 2))
+          ws.send(JSON.stringify({ type:'log', msg:'Silence detection finished. Cutlist saved to '+outPath }))
+          ws.send(JSON.stringify({ type:'cuts', cuts }))
+        } catch (e) {
+          ws.send(JSON.stringify({ type:'log', msg:'Silence detection error: '+e.message }))
+        }
+      }
+    } catch (e) { 
+      console.error(e)
+    }
   })
 })
 
