@@ -2,30 +2,62 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>HyperFrame Panel (Dev)</title>
+    <title>HyperFrame Panel</title>
     <style>
-      body { background:#0b1220; color:#e6f0ff; font-family:Arial,Helvetica,sans-serif; margin:0; padding:16px }
-      .panel { max-width:900px; margin:0 auto }
-      .header { display:flex; align-items:center; gap:12px }
-      .brand { font-size:20px; font-weight:700; color:#6be0a7 }
-      .card { background:#071016; border:1px solid #123; padding:12px; margin-top:12px; border-radius:8px }
-      .progress { height:16px; background:#021216; border-radius:8px; overflow:hidden; margin-top:8px }
-      .progress > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#2dd1b3,#1fb6ff) }
-      button { background:#0f1724; color:#aee6ff; border:1px solid #123; padding:8px 12px; border-radius:6px; cursor:pointer }
+      :root {
+        --bg: #08131d;
+        --panel: #0d1d2a;
+        --panel-alt: #0b1722;
+        --line: #163248;
+        --primary: #5ecaf8;
+        --accent: #69e3b8;
+        --text: #ebf8ff;
+        --muted: #99b8cc;
+      }
+      * { box-sizing: border-box }
+      body {
+        margin: 0; background: var(--bg); color: var(--text); font-family: Arial, Helvetica, sans-serif;
+      }
+      .panel { padding: 16px; max-width: 980px; margin: 0 auto }
+      .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px }
+      .brand { font-size: 20px; font-weight: 700; color: var(--accent) }
+      .status { color: var(--muted); font-size: 12px }
+      .card {
+        background: linear-gradient(180deg, var(--panel), var(--panel-alt)); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 12px
+      }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px }
+      button {
+        background: #0f2233; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; cursor: pointer
+      }
+      button.primary { background: linear-gradient(90deg, #163a52, #0c7aa3); }
+      button.warn { background: linear-gradient(90deg, #302119, #7d422c) }
+      .progress { height: 18px; background: #020c12; border-radius: 8px; overflow: hidden; border: 1px solid var(--line) }
+      .progress > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)) }
+      #log { background: #021217; color: #aeeaf7; border: 1px solid var(--line); border-radius: 8px; min-height: 180px; max-height: 260px; overflow: auto; padding: 8px; white-space: pre-wrap; }
+      input[type="file"] { display: none }
+      .label-btn { display: inline-block; background: #0f2233; border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; cursor: pointer }
+      .small { color: var(--muted); font-size: 12px }
     </style>
   </head>
   <body>
     <div class="panel">
       <div class="header">
         <div class="brand">HyperFrame</div>
-        <div style="color:#9fb7c8">Premiere Pro Assistant (Dev)</div>
+        <div class="status" id="status">disconnected</div>
       </div>
 
       <div class="card">
-        <div><strong>Backend status:</strong> <span id="status">disconnected</span></div>
-        <div style="margin-top:8px"><button id="startFF">Run ffmpeg demo</button></div>
-        <div class="progress" aria-hidden="true"><i id="bar"></i></div>
-        <pre id="log" style="height:200px; overflow:auto; background:#021216; padding:8px; border-radius:6px; margin-top:8px; color:#9bd6ff"></pre>
+        <div class="small">Workflow: silence removal → audio cleanup → transcript → SFX + captions → export</div>
+        <div class="row">
+          <label class="label-btn" for="fileInput">Choose media</label>
+          <input id="fileInput" type="file" accept="video/*,audio/*" />
+          <button class="primary" id="runSilenceBtn">Run silence removal</button>
+          <button id="runWhisperBtn">Run whisper offline</button>
+          <button class="warn" id="runSfxBtn">Scan SFX library</button>
+        </div>
+        <div class="small" id="selectedPath" style="margin-top:8px">No file selected</div>
+        <div class="progress" style="margin-top:12px"><i id="bar"></i></div>
+        <pre id="log"></pre>
       </div>
     </div>
 

@@ -1,71 +1,116 @@
 const http = require('http')
 const WebSocket = require('ws')
-const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
-const { detectSilence } = require('./silence')
+const { detectSilence, runWhisperOffline } = require('./ffmpegService')
 
 const server = http.createServer()
 const wss = new WebSocket.Server({ server })
 
+function broadcast(ws, payload) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload))
+  }
+}
+
 wss.on('connection', (ws) => {
   console.log('client connected')
-  ws.send(JSON.stringify({ type:'log', msg:'Welcome to HyperFrame backend' }))
+  broadcast(ws, { type: 'log', msg: 'HyperFrame backend ready' })
 
   ws.on('message', async (msg) => {
     try {
       const data = JSON.parse(msg)
-      if (data.action === 'run-ffmpeg-demo') runFFmpegDemo(ws)
-      else if (data.action === 'run-silence') {
-        const file = data.input || path.join(__dirname, 'test_assets', 'sample.mp4')
-        ws.send(JSON.stringify({ type:'log', msg:'Starting silence detection on '+file }))
-        try {
-          const cuts = await detectSilence(file, (update) => {
-            ws.send(JSON.stringify({ type:'progress', percent: update }))
-          })
-          // save cutlist
+      switch (data.action) {
+        case 'run-ffmpeg-demo':
+          runFFmpegDemo(ws)
+          break
+
+        case 'run-silence': {
+          const input = data.input || path.join(__dirname, 'test_assets', 'sample.mp4')
+          if (!fs.existsSync(input)) {
+            broadcast(ws, { type: 'log', msg: `Input not found: ${input}` })
+            return
+          }
+
+          broadcast(ws, { type: 'log', msg: `Running silence detection on ${input}` })
+          const segments = await detectSilence(input, (pct) => broadcast(ws, { type: 'progress', percent: pct }))
           const outDir = path.join(__dirname, 'output')
-          if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive:true })
+          if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
           const outPath = path.join(outDir, 'cutlist.json')
-          fs.writeFileSync(outPath, JSON.stringify(cuts, null, 2))
-          ws.send(JSON.stringify({ type:'log', msg:'Silence detection finished. Cutlist saved to '+outPath }))
-          ws.send(JSON.stringify({ type:'cuts', cuts }))
-        } catch (e) {
-          ws.send(JSON.stringify({ type:'log', msg:'Silence detection error: '+e.message }))
+          fs.writeFileSync(outPath, JSON.stringify(segments, null, 2))
+          broadcast(ws, { type: 'log', msg: `Silence cutlist saved to ${outPath}` })
+          broadcast(ws, { type: 'cuts', cuts: segments })
+          broadcast(ws, { type: 'progress', percent: 100 })
+          break
+        }
+
+        case 'run-whisper': {
+          const input = data.input || path.join(__dirname, 'test_assets', 'sample.wav')
+          const model = data.model || path.join(__dirname, 'models', 'ggml-base.en.bin')
+
+          if (!fs.existsSync(input)) {
+            broadcast(ws, { type: 'log', msg: `Whisper input not found: ${input}` })
+            return
+          }
+
+          broadcast(ws, { type: 'log', msg: `Running Whisper offline: ${input}` })
+          const result = await runWhisperOffline(input, model, (pct) => broadcast(ws, { type: 'progress', percent: pct }))
+          const outDir = path.join(__dirname, 'output')
+          if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
+          const outPath = path.join(outDir, 'transcript.txt')
+          fs.writeFileSync(outPath, result)
+          broadcast(ws, { type: 'log', msg: `Transcript saved to ${outPath}` })
+          broadcast(ws, { type: 'transcript', text: result })
+          broadcast(ws, { type: 'progress', percent: 100 })
+          break
+        }
+
+        case 'scan-sfx': {
+          const directory = data.directory || 'C:/SFX'
+          const files = scanSfx(directory)
+          broadcast(ws, { type: 'sfx', files })
+          break
         }
       }
-    } catch (e) { 
-      console.error(e)
+    } catch (error) {
+      broadcast(ws, { type: 'log', msg: error.message || String(error) })
     }
   })
 })
 
-function broadcast(obj, ws){
-  const s = JSON.stringify(obj)
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(s)
+function scanSfx(directory) {
+  if (!fs.existsSync(directory)) return []
+  const files = []
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name)
+      const stat = fs.statSync(full)
+      if (stat.isDirectory()) walk(full)
+      else if (/\.(wav|mp3|aiff|flac)$/i.test(full)) files.push(full)
+    }
+  }
+  walk(directory)
+  return files
 }
 
 function runFFmpegDemo(ws) {
-  // Demo: run `ffmpeg -version` or a small command if ffmpeg.exe exists
-  const bin = path.join(__dirname, 'bin', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
+  const ffmpeg = path.join(__dirname, 'bin', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
+  const proc = spawn(ffmpeg, ['-version'])
 
-  const ff = spawn(bin, ['-version'])
+  proc.stdout.on('data', (d) => broadcast(ws, { type: 'log', msg: d.toString() }))
+  proc.stderr.on('data', (d) => broadcast(ws, { type: 'log', msg: d.toString() }))
 
-  ff.stdout.on('data', (d) => broadcast({type:'log', msg:d.toString()}, ws))
-  ff.stderr.on('data', (d) => broadcast({type:'log', msg:d.toString()}, ws))
-
-  ff.on('error', (err) => broadcast({type:'log', msg:'ffmpeg error: '+err.message}, ws))
-  ff.on('close', (code) => {
-    broadcast({type:'log', msg:'ffmpeg exited code '+code}, ws)
-    broadcast({type:'progress', percent:100}, ws)
+  proc.on('error', (err) => broadcast(ws, { type: 'log', msg: 'ffmpeg error: ' + err.message }))
+  proc.on('close', (code) => {
+    broadcast(ws, { type: 'log', msg: 'ffmpeg exited with code ' + code })
+    broadcast(ws, { type: 'progress', percent: 100 })
   })
 
-  // emit fake progress for demo
   let p = 0
-  const t = setInterval(() => {
+  const timer = setInterval(() => {
     p += 7
-    broadcast({type:'progress', percent:p}, ws)
-    if (p >= 90) { clearInterval(t) }
+    broadcast(ws, { type: 'progress', percent: p })
+    if (p >= 90) clearInterval(timer)
   }, 400)
 }
 
